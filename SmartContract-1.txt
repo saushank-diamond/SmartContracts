@@ -1,0 +1,56 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+
+contract PromptNFT is ERC721 {
+    uint256 public tokenCounter;
+    address payable public platformAddress;
+    uint256 public platformFeePercentage = 10; // Platform fee percentage (e.g., 10%)
+
+    // Mapping from tokenId to base usage fee
+    mapping(uint256 => uint256) public baseUsageFees;
+    mapping(uint256 => mapping(address => uint256)) public userUsageCounts;
+
+    constructor(address payable _platformAddress) ERC721("PromptNFT", "PNFT") {
+        tokenCounter = 0;
+        platformAddress = _platformAddress;
+    }
+
+    // Function to mint a new NFT
+    function mintPrompt(uint256 _baseUsageFee) public {
+        uint256 tokenId = tokenCounter;
+        _safeMint(msg.sender, tokenId);
+        baseUsageFees[tokenId] = _baseUsageFee;
+        tokenCounter += 1;
+    }
+
+    // Function to purchase usage rights
+    function purchaseUsage(uint256 tokenId, uint256 numberOfUses) public payable {
+        require(_exists(tokenId), "Token does not exist");
+        uint256 totalFee = baseUsageFees[tokenId] * numberOfUses;
+        require(msg.value >= totalFee, "Insufficient payment");
+
+        uint256 platformFee = (msg.value * platformFeePercentage) / 100;
+        uint256 creatorFee = msg.value - platformFee;
+
+        address payable creator = payable(ownerOf(tokenId));
+
+        // Transfer fees
+        platformAddress.transfer(platformFee);
+        creator.transfer(creatorFee);
+
+        // Update user's usage count
+        userUsageCounts[tokenId][msg.sender] += numberOfUses;
+
+        // Implement usage tracking if needed
+    }
+
+    // Function to use the prompt
+    function usePrompt(uint256 tokenId) public {
+        require(userUsageCounts[tokenId][msg.sender] > 0, "No usage rights remaining");
+        userUsageCounts[tokenId][msg.sender] -= 1;
+
+        // Logic to provide prompt content
+    }
+}

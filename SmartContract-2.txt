@@ -1,0 +1,113 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+contract MoneySplitter is Ownable {
+    address payable public receiver2; // Address to receive 70% of the funds
+    uint256 public ratio1 = 3; // 3 parts
+    uint256 public ratio2 = 7; // 7 parts
+    bool public isPaused = false; // Pause functionality
+
+    struct TransactionDetails {
+        address sender;
+        address dynamicReceiver;
+        uint256 amount;
+        uint256 part1;
+        uint256 part2;
+        uint256 timestamp;
+    }
+
+    TransactionDetails[] public transactions; // Store transaction history
+
+    event FundsSplit(address indexed sender, uint256 amount, address indexed dynamicReceiver, uint256 part1, uint256 part2);
+    event Receiver2Updated(address indexed oldAddress, address indexed newAddress);
+    event RatioUpdated(uint256 newRatio1, uint256 newRatio2);
+    event ContractPaused(bool paused);
+    event ErrorOccurred(address indexed sender, string reason, uint256 timestamp); // New event for errors
+
+    constructor(address payable _receiver2) {
+        require(_receiver2 != address(0), "Invalid address for receiver2");
+        receiver2 = _receiver2;
+    }
+
+    modifier whenNotPaused() {
+        require(!isPaused, "Contract is paused");
+        _;
+    }
+
+    function splitFundsWithStablecoin(address tokenAddress, uint256 amount, address dynamicReceiver) public whenNotPaused {
+        if (amount <= 0) {
+            emit ErrorOccurred(msg.sender, "No tokens sent", block.timestamp);
+            return;
+        }
+        if (dynamicReceiver == address(0)) {
+            emit ErrorOccurred(msg.sender, "Invalid dynamic receiver address", block.timestamp);
+            return;
+        }
+
+        IERC20 token = IERC20(tokenAddress);
+        if (token.allowance(msg.sender, address(this)) < amount) {
+            emit ErrorOccurred(msg.sender, "Allowance not sufficient", block.timestamp);
+            return;
+        }
+
+        uint256 part1 = (amount * ratio1) / (ratio1 + ratio2); // 30% or based on ratio
+        uint256 part2 = amount - part1;   // Remaining 70% or based on ratio
+
+        if (!token.transferFrom(msg.sender, dynamicReceiver, part1)) {
+            emit ErrorOccurred(msg.sender, "Transfer to dynamic receiver failed", block.timestamp);
+            return;
+        }
+        if (!token.transferFrom(msg.sender, receiver2, part2)) {
+            emit ErrorOccurred(msg.sender, "Transfer to receiver2 failed", block.timestamp);
+            return;
+        }
+
+        // Record transaction details
+        transactions.push(TransactionDetails({
+            sender: msg.sender,
+            dynamicReceiver: dynamicReceiver,
+            amount: amount,
+            part1: part1,
+            part2: part2,
+            timestamp: block.timestamp
+        }));
+
+        emit FundsSplit(msg.sender, amount, dynamicReceiver, part1, part2);
+    }
+
+    function updateReceiver2(address payable _newReceiver2) public {
+        require(msg.sender == receiver2, "Only current receiver2 can update");
+        require(_newReceiver2 != address(0), "Invalid address");
+        emit Receiver2Updated(receiver2, _newReceiver2);
+        receiver2 = _newReceiver2;
+    }
+
+    function updateRatio(uint256 _ratio1, uint256 _ratio2) public onlyOwner {
+        require(_ratio1 + _ratio2 == 10, "Invalid ratio, must sum to 10");
+        ratio1 = _ratio1;
+        ratio2 = _ratio2;
+        emit RatioUpdated(_ratio1, _ratio2);
+    }
+
+    function getTransaction(uint256 index) public view returns (TransactionDetails memory) {
+        require(index < transactions.length, "Invalid transaction index");
+        return transactions[index];
+    }
+
+    function pause() public onlyOwner {
+        isPaused = true;
+        emit ContractPaused(true);
+    }
+
+    function unpause() public onlyOwner {
+        isPaused = false;
+        emit ContractPaused(false);
+    }
+
+    receive() external payable {
+        revert("Use splitFundsWithStablecoin for token transactions");
+    }
+}
